@@ -279,7 +279,7 @@ ENCODED_DB_PASSWORD="$(url_encode "$TWENTY_DB_PASSWORD")"
 
 PG_DATABASE_URL="$(
   printf \
-    'postgresql://%s:%s@%s:%s/%s?uselibpqcompat=true&sslmode=verify-full&sslrootcert=%s' \
+    'postgresql://%s:%s@%s:%s/%s?sslmode=verify-full&sslrootcert=%s' \
     "$ENCODED_DB_USER" \
     "$ENCODED_DB_PASSWORD" \
     "$TWENTY_DB_HOST" \
