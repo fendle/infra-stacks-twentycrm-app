@@ -92,7 +92,6 @@ x-twenty-environment: &twenty-environment
 
 x-twenty-common: &twenty-common
   image: twentycrm/twenty:${TAG:?TAG must be configured}
-  init: true
   restart: unless-stopped
 
   env_file:
