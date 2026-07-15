@@ -1,0 +1,234 @@
+name: twenty
+
+x-twenty-environment: &twenty-environment
+  # ---------------------------------------------------------------------------
+  # Runtime
+  # ---------------------------------------------------------------------------
+  NODE_ENV: production
+  NODE_PORT: "3000"
+
+  SERVER_URL: ${SERVER_URL:?SERVER_URL must be configured}
+  SERVER_KEEP_ALIVE_TIMEOUT_MS: ${SERVER_KEEP_ALIVE_TIMEOUT_MS:-65000}
+  TRUST_PROXY: ${TRUST_PROXY:-loopback,linklocal,uniquelocal}
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL
+  #
+  # PG_DATABASE_URL is supplied through the OpenBao-rendered secret env file.
+  # PostgreSQL runs externally on db-1 and stores PGDATA on LUKS storage.
+  # ---------------------------------------------------------------------------
+  PG_SSL_ALLOW_SELF_SIGNED: "false"
+
+  PG_DATABASE_PRIMARY_TIMEOUT_MS: ${PG_DATABASE_PRIMARY_TIMEOUT_MS:-600000}
+  PG_POOL_MAX_CONNECTIONS: ${PG_POOL_MAX_CONNECTIONS:-10}
+  PG_POOL_IDLE_TIMEOUT_MS: ${PG_POOL_IDLE_TIMEOUT_MS:-600000}
+  PG_POOL_ALLOW_EXIT_ON_IDLE: ${PG_POOL_ALLOW_EXIT_ON_IDLE:-true}
+
+  # ---------------------------------------------------------------------------
+  # Redis
+  # ---------------------------------------------------------------------------
+  REDIS_URL: redis://redis:6379
+
+  # ---------------------------------------------------------------------------
+  # Hetzner Object Storage
+  #
+  # S3 access keys are supplied through the OpenBao-rendered secret env file.
+  # ---------------------------------------------------------------------------
+  STORAGE_TYPE: S3
+  STORAGE_S3_REGION: ${STORAGE_S3_REGION:?STORAGE_S3_REGION must be configured}
+  STORAGE_S3_NAME: ${STORAGE_S3_NAME:?STORAGE_S3_NAME must be configured}
+  STORAGE_S3_ENDPOINT: ${STORAGE_S3_ENDPOINT:?STORAGE_S3_ENDPOINT must be configured}
+
+  # Start with application-proxied uploads and downloads.
+  # Direct browser-to-S3 uploads can be enabled later after bucket CORS testing.
+  STORAGE_S3_PRESIGNED_URL_ENABLED: ${STORAGE_S3_PRESIGNED_URL_ENABLED:-false}
+  STORAGE_S3_PRESIGNED_URL_EXPIRES_IN: ${STORAGE_S3_PRESIGNED_URL_EXPIRES_IN:-900}
+
+  # ---------------------------------------------------------------------------
+  # Twenty Logic Functions
+  #
+  # LOCAL is required for Workflow Code nodes.
+  # Code Interpreter is a separate feature and remains disabled.
+  # ---------------------------------------------------------------------------
+  LOGIC_FUNCTION_TYPE: LOCAL
+  CODE_INTERPRETER_TYPE: DISABLED
+
+  # ---------------------------------------------------------------------------
+  # Application configuration
+  # ---------------------------------------------------------------------------
+  IS_CONFIG_VARIABLES_IN_DB_ENABLED: ${IS_CONFIG_VARIABLES_IN_DB_ENABLED:-false}
+  IS_MULTIWORKSPACE_ENABLED: ${IS_MULTIWORKSPACE_ENABLED:-false}
+  IS_WORKSPACE_CREATION_LIMITED_TO_SERVER_ADMINS: ${IS_WORKSPACE_CREATION_LIMITED_TO_SERVER_ADMINS:-true}
+
+  # ---------------------------------------------------------------------------
+  # Authentication
+  # ---------------------------------------------------------------------------
+  AUTH_PASSWORD_ENABLED: ${AUTH_PASSWORD_ENABLED:-true}
+  SIGN_IN_PREFILLED: ${SIGN_IN_PREFILLED:-false}
+  IS_EMAIL_VERIFICATION_REQUIRED: ${IS_EMAIL_VERIFICATION_REQUIRED:-false}
+
+  # ---------------------------------------------------------------------------
+  # Email
+  #
+  # SMTP username and password are supplied through OpenBao.
+  # ---------------------------------------------------------------------------
+  EMAIL_DRIVER: ${EMAIL_DRIVER:-smtp}
+  EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:?EMAIL_FROM_ADDRESS must be configured}
+  EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Twenty CRM}
+  EMAIL_SYSTEM_ADDRESS: ${EMAIL_SYSTEM_ADDRESS:?EMAIL_SYSTEM_ADDRESS must be configured}
+  EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:?EMAIL_SMTP_HOST must be configured}
+  EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-465}
+  EMAIL_SMTP_NO_TLS: ${EMAIL_SMTP_NO_TLS:-false}
+
+  # ---------------------------------------------------------------------------
+  # Security
+  # ---------------------------------------------------------------------------
+  OUTBOUND_HTTP_SAFE_MODE_ENABLED: ${OUTBOUND_HTTP_SAFE_MODE_ENABLED:-true}
+
+  # ---------------------------------------------------------------------------
+  # Logging and telemetry
+  # ---------------------------------------------------------------------------
+  TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-false}
+  ANALYTICS_ENABLED: ${ANALYTICS_ENABLED:-false}
+  LOG_LEVELS: ${LOG_LEVELS:-log,error,warn,performance}
+
+  # Twenty OpenTelemetry metrics remain disabled until a collector exists.
+  METER_DRIVER: ${METER_DRIVER:-}
+
+x-twenty-common: &twenty-common
+  image: twentycrm/twenty:${TAG:?TAG must be configured}
+  init: true
+  restart: unless-stopped
+
+  env_file:
+    - /opt/secrets/twenty-app/twenty.env
+
+  networks:
+    - twenty-internal
+
+  volumes:
+    # Required for local Logic Function resources and dependencies.
+    # This volume is not used for uploaded attachments.
+    - twenty-function-data:/app/docker-data
+
+    # Internal CA used to verify PostgreSQL on db-1.
+    - /opt/internal-ca/twenty-postgres-ca.crt:/etc/twenty/ca/postgresql-ca.crt:ro
+
+  security_opt:
+    - no-new-privileges:true
+
+  cap_drop:
+    - ALL
+
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=512m
+
+services:
+  server:
+    <<: *twenty-common
+    container_name: infra-twenty-server
+
+    environment:
+      <<: *twenty-environment
+
+      # Only the server performs database migrations and cron registration.
+      DISABLE_DB_MIGRATIONS: "false"
+      DISABLE_CRON_JOBS_REGISTRATION: "false"
+
+    ports:
+      # Private app-2 address only.
+      # Traefik on ingress-1 forwards crm.mynaghi.me to this endpoint.
+      - "${APP_BIND_IP:-10.10.1.6}:${APP_BIND_PORT:-34000}:3000"
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl --fail --silent http://localhost:3000/healthz || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+
+    mem_limit: ${SERVER_MEMORY_LIMIT:-4g}
+    cpus: ${SERVER_CPU_LIMIT:-2.0}
+    pids_limit: ${SERVER_PIDS_LIMIT:-512}
+
+  worker:
+    <<: *twenty-common
+    container_name: infra-twenty-worker
+
+    command:
+      - yarn
+      - worker:prod
+
+    environment:
+      <<: *twenty-environment
+
+      # Prevent migration or cron-registration races.
+      DISABLE_DB_MIGRATIONS: "true"
+      DISABLE_CRON_JOBS_REGISTRATION: "true"
+
+    depends_on:
+      redis:
+        condition: service_healthy
+      server:
+        condition: service_healthy
+
+    stop_grace_period: 6m
+
+    # Logic Functions execute through the worker, so resource limits are
+    # especially important here.
+    mem_limit: ${WORKER_MEMORY_LIMIT:-4g}
+    cpus: ${WORKER_CPU_LIMIT:-2.0}
+    pids_limit: ${WORKER_PIDS_LIMIT:-512}
+
+  redis:
+    image: redis:${REDIS_TAG:-7-alpine}
+    container_name: infra-twenty-redis
+    restart: unless-stopped
+    init: true
+
+    # Redis is intentionally ephemeral.
+    command:
+      - redis-server
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+    networks:
+      - twenty-internal
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+    mem_limit: ${REDIS_MEMORY_LIMIT:-1g}
+    cpus: ${REDIS_CPU_LIMIT:-1.0}
+    pids_limit: ${REDIS_PIDS_LIMIT:-128}
+
+volumes:
+  twenty-function-data:
+    name: twenty-function-data
+
+networks:
+  twenty-internal:
+    name: twenty-internal
+    driver: bridge
