@@ -211,3 +211,122 @@ TWENTY_DB_HOST="$(
 
 TWENTY_DB_PORT="$(
   require_value "$DB_SECRET_RESPONSE" TWENTY_DB_PORT
+)"
+
+TWENTY_DB_NAME="$(
+  require_value "$DB_SECRET_RESPONSE" TWENTY_DB_NAME
+)"
+
+TWENTY_DB_USER="$(
+  require_value "$DB_SECRET_RESPONSE" TWENTY_DB_USER
+)"
+
+TWENTY_DB_PASSWORD="$(
+  require_value "$DB_SECRET_RESPONSE" TWENTY_DB_PASSWORD
+)"
+
+# ---------------------------------------------------------------------------
+# Reject provisioning placeholders
+# ---------------------------------------------------------------------------
+
+if grep -Fq "DUMMY_REPLACE" <<<"$APP_SECRET_RESPONSE"; then
+  echo "ERROR: Twenty application secrets still contain DUMMY_REPLACE values." >&2
+  exit 1
+fi
+
+if grep -Fq "DUMMY_REPLACE" <<<"$DB_SECRET_RESPONSE"; then
+  echo "ERROR: Twenty database secrets still contain DUMMY_REPLACE values." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Validate approved database destination
+# ---------------------------------------------------------------------------
+
+if [ "$TWENTY_DB_HOST" != "twenty-db.internal.mynaghi.me" ]; then
+  echo "ERROR: unexpected TWENTY_DB_HOST: ${TWENTY_DB_HOST}" >&2
+  exit 1
+fi
+
+if [ "$TWENTY_DB_PORT" != "5433" ]; then
+  echo "ERROR: unexpected TWENTY_DB_PORT: ${TWENTY_DB_PORT}" >&2
+  exit 1
+fi
+
+if [ "$TWENTY_DB_NAME" != "default" ]; then
+  echo "ERROR: unexpected TWENTY_DB_NAME: ${TWENTY_DB_NAME}" >&2
+  exit 1
+fi
+
+if [ "$TWENTY_DB_USER" != "twenty_rw" ]; then
+  echo "ERROR: unexpected TWENTY_DB_USER: ${TWENTY_DB_USER}" >&2
+  exit 1
+fi
+
+case "$TWENTY_DB_PORT" in
+  ''|*[!0-9]*)
+    echo "ERROR: TWENTY_DB_PORT is not numeric." >&2
+    exit 1
+    ;;
+esac
+
+# ---------------------------------------------------------------------------
+# Build PostgreSQL connection URL
+# ---------------------------------------------------------------------------
+
+ENCODED_DB_USER="$(url_encode "$TWENTY_DB_USER")"
+ENCODED_DB_PASSWORD="$(url_encode "$TWENTY_DB_PASSWORD")"
+
+PG_DATABASE_URL="$(
+  printf \
+    'postgresql://%s:%s@%s:%s/%s?uselibpqcompat=true&sslmode=verify-full&sslrootcert=%s' \
+    "$ENCODED_DB_USER" \
+    "$ENCODED_DB_PASSWORD" \
+    "$TWENTY_DB_HOST" \
+    "$TWENTY_DB_PORT" \
+    "$TWENTY_DB_NAME" \
+    "$POSTGRES_CA_CONTAINER_PATH"
+)"
+
+# ---------------------------------------------------------------------------
+# Render Docker Compose secret environment
+# ---------------------------------------------------------------------------
+
+{
+  write_env_value APP_SECRET "$APP_SECRET"
+  write_env_value ENCRYPTION_KEY "$ENCRYPTION_KEY"
+  write_env_value FALLBACK_ENCRYPTION_KEY "$FALLBACK_ENCRYPTION_KEY"
+
+  write_env_value PG_DATABASE_URL "$PG_DATABASE_URL"
+
+  write_env_value \
+    STORAGE_S3_ACCESS_KEY_ID \
+    "$STORAGE_S3_ACCESS_KEY_ID"
+
+  write_env_value \
+    STORAGE_S3_SECRET_ACCESS_KEY \
+    "$STORAGE_S3_SECRET_ACCESS_KEY"
+
+  write_env_value EMAIL_SMTP_USER "$EMAIL_SMTP_USER"
+  write_env_value EMAIL_SMTP_PASSWORD "$EMAIL_SMTP_PASSWORD"
+
+  write_env_value \
+    OTEL_EXPORTER_OTLP_HEADERS \
+    "$OTEL_EXPORTER_OTLP_HEADERS"
+} >"$TMP_ENV"
+
+install \
+  -d \
+  -o root \
+  -g root \
+  -m 0700 \
+  "$OUTPUT_DIR"
+
+install \
+  -o root \
+  -g root \
+  -m 0600 \
+  "$TMP_ENV" \
+  "$OUTPUT_FILE"
+
+echo "OK: rendered ${OUTPUT_FILE}"
