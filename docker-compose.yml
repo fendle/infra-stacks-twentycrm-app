@@ -102,6 +102,7 @@ x-twenty-common: &twenty-common
 
   env_file:
     - /opt/secrets/twenty-app/twenty.env
+    - .env
 
   networks:
     - twenty-internal
