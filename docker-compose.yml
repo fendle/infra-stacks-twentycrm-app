@@ -39,16 +39,11 @@ x-twenty-environment: &twenty-environment
   STORAGE_S3_NAME: ${STORAGE_S3_NAME:?STORAGE_S3_NAME must be configured}
   STORAGE_S3_ENDPOINT: ${STORAGE_S3_ENDPOINT:?STORAGE_S3_ENDPOINT must be configured}
 
-  # Start with application-proxied uploads and downloads.
-  # Direct browser-to-S3 uploads can be enabled later after bucket CORS testing.
   STORAGE_S3_PRESIGNED_URL_ENABLED: ${STORAGE_S3_PRESIGNED_URL_ENABLED:-false}
   STORAGE_S3_PRESIGNED_URL_EXPIRES_IN: ${STORAGE_S3_PRESIGNED_URL_EXPIRES_IN:-900}
 
   # ---------------------------------------------------------------------------
   # Twenty Logic Functions
-  #
-  # LOCAL is required for Workflow Code nodes.
-  # Code Interpreter is a separate feature and remains disabled.
   # ---------------------------------------------------------------------------
   LOGIC_FUNCTION_TYPE: LOCAL
   CODE_INTERPRETER_TYPE: DISABLED
@@ -56,7 +51,7 @@ x-twenty-environment: &twenty-environment
   # ---------------------------------------------------------------------------
   # Application configuration
   # ---------------------------------------------------------------------------
-  IS_CONFIG_VARIABLES_IN_DB_ENABLED: ${IS_CONFIG_VARIABLES_IN_DB_ENABLED:-false}
+  IS_CONFIG_VARIABLES_IN_DB_ENABLED: ${IS_CONFIG_VARIABLES_IN_DB_ENABLED:-true}
   IS_MULTIWORKSPACE_ENABLED: ${IS_MULTIWORKSPACE_ENABLED:-false}
   IS_WORKSPACE_CREATION_LIMITED_TO_SERVER_ADMINS: ${IS_WORKSPACE_CREATION_LIMITED_TO_SERVER_ADMINS:-true}
 
@@ -92,8 +87,8 @@ x-twenty-environment: &twenty-environment
   ANALYTICS_ENABLED: ${ANALYTICS_ENABLED:-false}
   LOG_LEVELS: ${LOG_LEVELS:-log,error,warn,performance}
 
-  # Twenty OpenTelemetry metrics remain disabled until a collector exists.
   METER_DRIVER: ${METER_DRIVER:-}
+  OTLP_COLLECTOR_METRICS_ENDPOINT_URL: ${OTLP_COLLECTOR_METRICS_ENDPOINT_URL:-}
 
 x-twenty-common: &twenty-common
   image: twentycrm/twenty:${TAG:?TAG must be configured}
@@ -121,8 +116,16 @@ x-twenty-common: &twenty-common
   cap_drop:
     - ALL
 
+  read_only: true
+
   tmpfs:
     - /tmp:rw,nosuid,nodev,size=512m
+    - /run:rw,nosuid,nodev,size=16m
+
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
 
 services:
   server:
@@ -154,6 +157,8 @@ services:
       retries: 30
       start_period: 90s
 
+    stop_grace_period: 2m
+
     mem_limit: ${SERVER_MEMORY_LIMIT:-4g}
     cpus: ${SERVER_CPU_LIMIT:-2.0}
     pids_limit: ${SERVER_PIDS_LIMIT:-512}
@@ -181,8 +186,6 @@ services:
 
     stop_grace_period: 6m
 
-    # Logic Functions execute through the worker, so resource limits are
-    # especially important here.
     mem_limit: ${WORKER_MEMORY_LIMIT:-4g}
     cpus: ${WORKER_CPU_LIMIT:-2.0}
     pids_limit: ${WORKER_PIDS_LIMIT:-512}
@@ -193,9 +196,10 @@ services:
     restart: unless-stopped
     init: true
 
-    # Redis is intentionally ephemeral.
     command:
       - redis-server
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-384mb}
       - --maxmemory-policy
       - noeviction
       - --save
@@ -221,8 +225,24 @@ services:
     cap_drop:
       - ALL
 
-    mem_limit: ${REDIS_MEMORY_LIMIT:-1g}
-    cpus: ${REDIS_CPU_LIMIT:-1.0}
+    cap_add:
+      - SETUID
+      - SETGID
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=32m
+      - /run:rw,nosuid,nodev,size=16m
+      - /data:rw,nosuid,nodev,size=64m
+
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    mem_limit: ${REDIS_MEMORY_LIMIT:-512m}
+    cpus: ${REDIS_CPU_LIMIT:-0.5}
     pids_limit: ${REDIS_PIDS_LIMIT:-128}
 
 volumes:
