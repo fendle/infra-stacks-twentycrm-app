@@ -113,7 +113,7 @@ x-twenty-common: &twenty-common
     - twenty-function-data:/app/docker-data
 
     # Internal CA used to verify PostgreSQL on db-1.
-    - /opt/internal-ca/twenty-postgres-ca.crt:/etc/twenty/ca/postgresql-ca.crt:ro
+    - /opt/internal-ca/infra-ca.crt:/etc/twenty/ca/postgresql-ca.crt:ro
 
   security_opt:
     - no-new-privileges:true
