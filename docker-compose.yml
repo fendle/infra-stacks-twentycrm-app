@@ -121,6 +121,11 @@ x-twenty-common: &twenty-common
     - /tmp:rw,nosuid,nodev,size=512m
     - /run:rw,nosuid,nodev,size=16m
 
+    # Twenty invokes Yarn when building Code Node / Logic Function
+    # dependencies. Keep HOME=/home/node, but make that directory
+    # writable despite the read-only container filesystem.
+    - /home/node:rw,nosuid,nodev,size=512m,mode=0700,uid=1000,gid=1000
+
   ulimits:
     nofile:
       soft: 65536
