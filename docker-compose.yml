@@ -193,7 +193,6 @@ services:
     image: redis:${REDIS_TAG:-7-alpine}
     container_name: infra-twenty-redis
     restart: unless-stopped
-    init: true
 
     command:
       - redis-server
