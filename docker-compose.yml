@@ -158,9 +158,9 @@ services:
 
     stop_grace_period: 2m
 
-    mem_limit: ${SERVER_MEMORY_LIMIT:-4g}
-    cpus: ${SERVER_CPU_LIMIT:-2.0}
-    pids_limit: ${SERVER_PIDS_LIMIT:-512}
+    #mem_limit: ${SERVER_MEMORY_LIMIT:-4g}
+    #cpus: ${SERVER_CPU_LIMIT:-2.0}
+    #pids_limit: ${SERVER_PIDS_LIMIT:-512}
 
   worker:
     <<: *twenty-common
@@ -240,9 +240,9 @@ services:
         soft: 65536
         hard: 65536
 
-    mem_limit: ${REDIS_MEMORY_LIMIT:-512m}
-    cpus: ${REDIS_CPU_LIMIT:-0.5}
-    pids_limit: ${REDIS_PIDS_LIMIT:-128}
+    #mem_limit: ${REDIS_MEMORY_LIMIT:-512m}
+    #cpus: ${REDIS_CPU_LIMIT:-0.5}
+    #pids_limit: ${REDIS_PIDS_LIMIT:-128}
 
 volumes:
   twenty-function-data:
