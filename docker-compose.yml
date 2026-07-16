@@ -197,7 +197,7 @@ services:
     command:
       - redis-server
       - --maxmemory
-      - ${REDIS_MAXMEMORY:-384mb}
+      - ${REDIS_MAXMEMORY:-1gb}
       - --maxmemory-policy
       - noeviction
       - --save
